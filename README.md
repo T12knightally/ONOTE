@@ -4,7 +4,8 @@
 [![Paper](https://img.shields.io/badge/Paper-Arxiv_Link-red.svg)](#)
 [![Dataset](https://img.shields.io/badge/Dataset-HuggingFace-blue.svg)](#)
 
-> This is the official repository for the paper: **ONOTE: Benchmarking Omnimodal Notation Processing for Expert-level Music Intelligence**.
+> This is the official repository for the paper: **ONOTE: Benchmarking Omnimodal Notation Processing for
+Expert-level Music Intelligence**.
 
 Omnimodal Large Language Models (LLMs) excel generally, but Symbolic Music Processing (SMP) remains a formidable challenge plagued by Western notation biases and subjective "LLM-as-a-judge" evaluation hallucinations. 
 
@@ -45,17 +46,78 @@ $$Acc(S_{gt}, S_{pred}) = \max \left(0, 1 - \frac{ED(S_{gt}, S_{pred})}{\max(|S_
 
 ## 🏆 Leaderboard
 
-Performance of state-of-the-art MLLMs evaluated on ONOTE. *(For detailed metric breakdowns, please refer to our paper).*
+Performance of state-of-the-art **Omnimodal LLMs** evaluated on ONOTE. The table details the dual-axis generative scores and alignment accuracies across three heterogeneous notation systems. Bold values indicate the best performance in each metric.
 
-| Model | SMG (Score) | CNC (Acc. %) | VSU (Acc. %) | AST (Acc. %) |
-| :--- | :---: | :---: | :---: | :---: |
-| **Qwen3-Omni-flash** | 3.84 | 17.31 | 88.00 | 9.32 |
-| **Gemini-2.5-pro** | 3.03 | 17.04 | 97.00 | 7.50 |
-| **Gemini-3.1-flash-lite** | 4.47 | 17.29 | **99.00** | 7.61 |
-| **Gemini-2.5-flash** | 1.31 | **46.08** | 36.00 | 2.17 |
-| *...more in paper* | ... | ... | ... | ... |
+<table>
+  <thead>
+    <tr>
+      <th rowspan="2">Models</th>
+      <th colspan="4" align="center">Standard Staff</th>
+      <th colspan="4" align="center">Jianpu</th>
+      <th colspan="4" align="center">Guitar Tablature</th>
+    </tr>
+    <tr>
+      <th align="center">SMG<br><sub>(Score)</sub></th>
+      <th align="center">CNC<br><sub>(Acc. %)</sub></th>
+      <th align="center">VSU<br><sub>(Acc. %)</sub></th>
+      <th align="center">AST<br><sub>(Acc. %)</sub></th>
+      <th align="center">SMG<br><sub>(Score)</sub></th>
+      <th align="center">CNC<br><sub>(Acc. %)</sub></th>
+      <th align="center">VSU<br><sub>(Acc. %)</sub></th>
+      <th align="center">AST<br><sub>(Acc. %)</sub></th>
+      <th align="center">SMG<br><sub>(Score)</sub></th>
+      <th align="center">CNC<br><sub>(Acc. %)</sub></th>
+      <th align="center">VSU<br><sub>(Acc. %)</sub></th>
+      <th align="center">AST<br><sub>(Acc. %)</sub></th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Baichuan-Omni-1.5</td>
+      <td align="center">1.24</td><td align="center"><b>18.54</b></td><td align="center">4.00</td><td align="center">3.96</td>
+      <td align="center">1.39</td><td align="center">5.51</td><td align="center">19.8</td><td align="center">14.75</td>
+      <td align="center">1.67</td><td align="center">6.42</td><td align="center">18.5</td><td align="center">1.53</td>
+    </tr>
+    <tr>
+      <td>Qwen2.5-Omni-7b</td>
+      <td align="center"><b>4.51</b></td><td align="center">14.27</td><td align="center">44.00</td><td align="center">3.79</td>
+      <td align="center">1.07</td><td align="center">8.62</td><td align="center">65.30</td><td align="center">20.63</td>
+      <td align="center">2.67</td><td align="center">7.05</td><td align="center">80.2</td><td align="center">3.30</td>
+    </tr>
+    <tr>
+      <td>Qwen-Omni-turbo</td>
+      <td align="center">2.07</td><td align="center">14.72</td><td align="center">48.00</td><td align="center">8.55</td>
+      <td align="center">1.39</td><td align="center">8.86</td><td align="center">62.38</td><td align="center">14.78</td>
+      <td align="center">2.79</td><td align="center">7.45</td><td align="center">60.49</td><td align="center"><b>4.32</b></td>
+    </tr>
+    <tr>
+      <td>Qwen3-Omni-flash</td>
+      <td align="center">3.84</td><td align="center">17.31</td><td align="center">88.00</td><td align="center"><b>9.32</b></td>
+      <td align="center">1.86</td><td align="center">5.49</td><td align="center">82.10</td><td align="center">17.96</td>
+      <td align="center">3.19</td><td align="center">4.07</td><td align="center">94.37</td><td align="center">2.55</td>
+    </tr>
+    <tr>
+      <td>Gemini-2.5-flash</td>
+      <td align="center">1.31</td><td align="center">12.98</td><td align="center">45.00</td><td align="center">4.11</td>
+      <td align="center">1.52</td><td align="center">9.44</td><td align="center">46.07</td><td align="center">19.85</td>
+      <td align="center">1.17</td><td align="center"><b>46.08</b></td><td align="center">36.00</td><td align="center">2.17</td>
+    </tr>
+    <tr>
+      <td>Gemini-2.5-pro</td>
+      <td align="center">3.03</td><td align="center">17.04</td><td align="center">97.00</td><td align="center">7.50</td>
+      <td align="center">4.33</td><td align="center"><b>23.04</b></td><td align="center"><b>90.38</b></td><td align="center">15.67</td>
+      <td align="center">3.71</td><td align="center">43.58</td><td align="center">82.72</td><td align="center">2.57</td>
+    </tr>
+    <tr>
+      <td>Gemini-3.1-flash-lite-preview</td>
+      <td align="center">4.47</td><td align="center">17.29</td><td align="center"><b>99.00</b></td><td align="center">7.61</td>
+      <td align="center"><b>4.72</b></td><td align="center">13.06</td><td align="center">80.20</td><td align="center"><b>24.32</b></td>
+      <td align="center"><b>3.68</b></td><td align="center">22.47</td><td align="center"><b>93.83</b></td><td align="center">1.64</td>
+    </tr>
+  </tbody>
+</table>
 
-*(Note: High VSU accuracy strongly contrasts with low CNC/AST scores, exposing a critical gap between visual perception and music-theoretic reasoning in current models.)*
+*(Note: High VSU accuracy across notations strongly contrasts with overall low CNC/AST scores, exposing a critical gap between optical perception and structural music-theoretic reasoning in current architectures.)*
 
 ---
 
@@ -63,8 +125,4 @@ Performance of state-of-the-art MLLMs evaluated on ONOTE. *(For detailed metric 
 
 The ONOTE dataset comprises 1,120 high-quality test samples, meticulously cleaned and cross-modally aligned from sources like MusiXQA and GuitarSet.
 
-You can download the dataset via [HuggingFace Datasets](#) or directly clone the data folder:
-
-```bash
-git clone [https://github.com/your-username/ONOTE.git](https://github.com/your-username/ONOTE.git)
-cd ONOTE/dataset
+You can download the dataset via [HuggingFace Datasets](#) 
