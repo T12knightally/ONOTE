@@ -6,7 +6,7 @@ import base64
 import time
 from pathlib import Path
 from openai import OpenAI, RateLimitError
-from difflib import SequenceMatcher
+from sequence_metrics import sequence_similarity
 
 _KC_ROOT_ENV = os.environ.get("KNOWLEDGECLAW_ROOT")
 KNOWLEDGECLAW_ROOT = Path(_KC_ROOT_ENV) if _KC_ROOT_ENV else Path(__file__).resolve().parents[2]
@@ -43,7 +43,7 @@ def encode_image(image_path):
 
 
 def get_model_prediction(image_path, system_prompt, max_retries=3):
-    """发送图片给模型，返回解析后的 JSON 字典；失败返回 None。"""
+    """Send an image to the model and return a parsed JSON object, or None on failure."""
     base64_image = encode_image(image_path)
     rag_context = get_rag_context(_CURRENT_TASK)
     rag_messages = [rag_system_message(rag_context, "cnc")] if rag_context else []
@@ -104,7 +104,7 @@ def run_guitar_to_staff():
     GROUND_TRUTH_PATH = os.path.join(DATA_ROOT, "data", "guitar_notation", "all_pitches_summary.json")
 
     if not os.path.exists(GROUND_TRUTH_PATH):
-        print(f"找不到标准答案文件: {GROUND_TRUTH_PATH}")
+        print(f"Ground-truth file not found: {GROUND_TRUTH_PATH}")
         return
     with open(GROUND_TRUTH_PATH, 'r', encoding='utf-8') as f:
         ground_truth = json.load(f)
@@ -115,26 +115,26 @@ def run_guitar_to_staff():
     for filename in files:
         json_key = os.path.splitext(filename)[0] + ".json"
         if json_key not in ground_truth:
-            print(f"跳过 {filename}: 在 JSON 中找不到对应的 Key '{json_key}'")
+            print(f"Skipping {filename}: key '{json_key}' was not found in the JSON file.")
             continue
 
-        print(f"--- 正在处理: {filename} ---")
+        print(f"--- Processing: {filename} ---")
         prediction = get_model_prediction(os.path.join(IMAGE_DIR, filename), GUITAR_SYSTEM_PROMPT)
 
         if prediction and "pitches" in prediction:
             pred_list = [p.upper() for p in prediction["pitches"]]
             target_list = [t.upper() for t in ground_truth[json_key]]
-            score = SequenceMatcher(None, pred_list, target_list).ratio()
+            score = sequence_similarity(target_list, pred_list)
             all_scores.append(score)
-            print(f"  预测: {pred_list}")
-            print(f"  标准: {target_list}")
-            print(f"  准确率: {score:.2%}")
+            print(f"  Prediction: {pred_list}")
+            print(f"  Reference: {target_list}")
+            print(f"  CNC sequence similarity: {score:.2%}")
         else:
-            print(f"  {filename} 识别失败")
+            print(f"  Recognition failed for {filename}.")
 
     if all_scores:
-        print(f"\n评估完成！总样本数: {len(all_scores)}")
-        print(f"平均音高正确率: {sum(all_scores) / len(all_scores):.2%}")
+        print(f"\nEvaluation complete. Number of scored items: {len(all_scores)}")
+        print(f"Mean CNC sequence similarity: {sum(all_scores) / len(all_scores):.2%}")
 
 
 _CURRENT_TASK = "jianpu_to_staff"
@@ -158,7 +158,7 @@ JIANPU_TO_STAFF_SYSTEM_PROMPT = """You are a highly precise Music OCR AI. Your t
 """
 
 
-def calculate_detailed_accuracy(pred_list, target_list):
+def calculate_detailed_similarity(pred_list, target_list):
     if not target_list or not pred_list:
         return 0.0, 0.0, 0.0
     pred_pitches = [re.sub(r'\(.*\)', '', n) for n in pred_list]
@@ -169,8 +169,8 @@ def calculate_detailed_accuracy(pred_list, target_list):
 
     pred_rhythms = get_durations(pred_list)
     target_rhythms = get_durations(target_list)
-    p_score = SequenceMatcher(None, pred_pitches, target_pitches).ratio()
-    r_score = SequenceMatcher(None, pred_rhythms, target_rhythms).ratio()
+    p_score = sequence_similarity(target_pitches, pred_pitches)
+    r_score = sequence_similarity(target_rhythms, pred_rhythms)
     return p_score, r_score, (p_score + r_score) / 2
 
 
@@ -179,14 +179,14 @@ def run_jianpu_to_staff():
     GROUND_TRUTH_PATH = os.path.join(DATA_ROOT, "data", "pitch_duration_summarywuxian.json")
 
     if not os.path.exists(GROUND_TRUTH_PATH):
-        print(f"错误: 找不到文件 {GROUND_TRUTH_PATH}")
+        print(f"Error: file not found: {GROUND_TRUTH_PATH}")
         return
     with open(GROUND_TRUTH_PATH, 'r', encoding='utf-8') as f:
         ground_truth = json.load(f)
 
     history = {"pitch": [], "rhythm": [], "average": []}
     images = [f for f in os.listdir(IMAGE_DIR) if f.lower().endswith(('.png', '.jpg'))]
-    print(f"开始评估，共计 {len(images)} 个文件...")
+    print(f"Starting evaluation for {len(images)} files...")
 
     for filename in images:
         file_id = os.path.splitext(filename)[0]
@@ -194,31 +194,31 @@ def run_jianpu_to_staff():
         candidates = [file_id, base_id, f"{file_id}.json", f"{base_id}.json"]
         json_key = next((c for c in candidates if c in ground_truth), None)
         if json_key is None:
-            print(f"跳过 {filename}: 在标准答案中未找到对应 Key (尝试: {candidates})")
+            print(f"Skipping {filename}: no ground-truth key found among {candidates}.")
             continue
 
         print(f"\n" + "-" * 50)
-        print(f"正在处理: {filename}")
+        print(f"Processing: {filename}")
         pred_notes = get_model_prediction(os.path.join(IMAGE_DIR, filename), JIANPU_TO_STAFF_SYSTEM_PROMPT)
         if pred_notes:
             target_notes = ground_truth[json_key]
-            p_acc, r_acc, avg_acc = calculate_detailed_accuracy(pred_notes, target_notes)
-            history["pitch"].append(p_acc)
-            history["rhythm"].append(r_acc)
-            history["average"].append(avg_acc)
-            print(f"  [预测示例]: {pred_notes[:8]}")
-            print(f"  [标准示例]: {target_notes[:8]}")
-            print(f"  [准确率详情] 音高: {p_acc:.2%} | 节奏: {r_acc:.2%} | 平均: {avg_acc:.2%}")
+            pitch_sr, duration_sr, item_sr = calculate_detailed_similarity(pred_notes, target_notes)
+            history["pitch"].append(pitch_sr)
+            history["rhythm"].append(duration_sr)
+            history["average"].append(item_sr)
+            print(f"  [Prediction sample]: {pred_notes[:8]}")
+            print(f"  [Reference sample]: {target_notes[:8]}")
+            print(f"  [CNC SR] Pitch: {pitch_sr:.2%} | Duration: {duration_sr:.2%} | Mean: {item_sr:.2%}")
         else:
-            print("  [失败] 无法获取模型响应")
+            print("  [Failure] No model response was received.")
 
     if history["average"]:
         num = len(history["average"])
         print("\n" + "=" * 60)
-        print(f"评估任务完成！处理样本数: {num}")
-        print(f"最终平均音高正确率: {sum(history['pitch']) / num:.2%}")
-        print(f"最终平均节奏正确率: {sum(history['rhythm']) / num:.2%}")
-        print(f"最终平均总正确率:   {sum(history['average']) / num:.2%}")
+        print(f"Evaluation complete. Number of scored items: {num}")
+        print(f"Mean pitch sequence similarity: {sum(history['pitch']) / num:.2%}")
+        print(f"Mean duration sequence similarity: {sum(history['rhythm']) / num:.2%}")
+        print(f"Mean CNC sequence similarity: {sum(history['average']) / num:.2%}")
         print("=" * 60)
 
 
@@ -257,7 +257,7 @@ Example 2 (Double Staff):
 """
 
 
-def calculate_accuracy(pred_str, target_str):
+def calculate_sequence_similarity(pred_str, target_str):
     if not pred_str:
         return 0.0, 0.0
     p_str = str(pred_str).replace('（', '(').replace('）', ')')
@@ -269,7 +269,7 @@ def calculate_accuracy(pred_str, target_str):
         return 0.0, 0.0
     p_pred, r_pred = [n[0] for n in pred_notes], [n[1] for n in pred_notes]
     p_tar, r_tar = [n[0] for n in target_notes], [n[1] for n in target_notes]
-    ratio = lambda a, b: SequenceMatcher(None, a, b).ratio()
+    ratio = lambda a, b: sequence_similarity(b, a)
     return ratio(p_pred, p_tar), ratio(r_pred, r_tar)
 
 
@@ -299,9 +299,9 @@ def run_staff_to_jianpu():
             for clef in ['treble', 'bass']:
                 if clef in target:
                     pred_content = prediction.get(clef, "")
-                    p_acc, r_acc = calculate_accuracy(pred_content, target[clef])
-                    item_scores.append((p_acc * 0.5) + (r_acc * 0.5))
-                    print(f"  [{clef}] Pitch: {p_acc:.2%}, Rhythm: {r_acc:.2%}")
+                    pitch_sr, duration_sr = calculate_sequence_similarity(pred_content, target[clef])
+                    item_scores.append((pitch_sr + duration_sr) / 2)
+                    print(f"  [{clef}] Pitch SR: {pitch_sr:.2%}, Duration SR: {duration_sr:.2%}")
             if item_scores:
                 all_scores.append(sum(item_scores) / len(item_scores))
                 print(f"  >> Average: {all_scores[-1]:.2%}")
@@ -321,11 +321,11 @@ TASKS = {
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description="CNC 记谱图片 OCR/互转评测")
+    parser = argparse.ArgumentParser(description="Cross-format notation conversion evaluation")
     parser.add_argument("--task", choices=list(TASKS), default="guitar_to_staff",
-                        help="子任务：guitar_to_staff / jianpu_to_staff / staff_to_jianpu")
+                        help="Task: guitar_to_staff / jianpu_to_staff / staff_to_jianpu")
     args = parser.parse_args()
-    # 让 get_model_prediction 知道当前 task 以拉取对应 RAG 上下文
+    # Make the active task available to get_model_prediction for RAG retrieval.
     global _CURRENT_TASK
     _CURRENT_TASK = args.task
     TASKS[args.task]()

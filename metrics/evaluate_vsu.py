@@ -17,7 +17,7 @@ if str(KNOWLEDGECLAW_ROOT) not in sys.path:
 
 DATA_ROOT = os.environ.get("MUSICBENCH_ROOT", r"D:\MusicBench")
 
-from integration.vsu.rag_adapter import rag_system_message, retrieve_vsu_context
+from integration.musicbench_rag_adapter import retrieve_vsu_context, vsu_rag_system_message
 
 API_KEY = os.environ.get("APIYI_API_KEY", "")
 if not API_KEY and os.path.exists("api_key_apiyi.txt"):
@@ -31,7 +31,7 @@ client = OpenAI(api_key=API_KEY.strip(), base_url=BASE_URL, timeout=300.0, max_r
 
 
 def extract_answer_letter(raw_response):
-    """从模型回复中提取唯一选项字母 A/B/C/D。"""
+    """Extract a single answer option letter A/B/C/D from the model response."""
     text = (raw_response or "").strip().upper()
     m = re.search(r'^([A-D])$', text)
     if m:
@@ -44,7 +44,7 @@ def extract_answer_letter(raw_response):
 
 
 def evaluate_mcq_question(image_path, prompt, description):
-    """发送图片 + 题目给多模态模型，返回（清洗后的）文本。失败返回含 [Error] 的字符串。"""
+    """Send an image and question to the multimodal model; failures return an [Error] string."""
     if not os.path.exists(image_path):
         return "[Error] Image Not Found"
 
@@ -54,7 +54,7 @@ def evaluate_mcq_question(image_path, prompt, description):
     image_url = f"data:{mime_type};base64,{image_data}"
 
     rag_context, _ = retrieve_vsu_context(prompt, [], description)
-    rag_messages = [rag_system_message(rag_context)] if rag_context else []
+    rag_messages = [vsu_rag_system_message(rag_context)] if rag_context else []
 
     for attempt in range(3):
         try:
@@ -95,11 +95,11 @@ def build_prompt_base(question, options):
 
 
 NOTATION_PROMPT_TAIL = """
-【CRITICAL REQUIREMENT】
+[CRITICAL REQUIREMENT]
 You are an expert Optical Music Recognition (OMR) AI.
 Carefully analyze the provided sheet music image and answer the multiple-choice question.
 
-【CRITICAL: Notation Format Rules】
+[CRITICAL: Notation Format Rules]
 The musical notes in the options are represented using a specific symbolic text format. You MUST decode them using the following rules to match the visual image:
 
 1. Durations (Note Values):
@@ -137,7 +137,7 @@ Carefully analyze the provided guitar tab image and answer the multiple-choice q
 The uppercase answer letter MUST be the very first character of your response.
 Please output ONLY the single letter of the correct option (A, B, C, or D). Do not explain or add any other text.
 
-【CRITICAL: Guitar Tablature Format Rules】
+[CRITICAL: Guitar Tablature Format Rules]
 The options use a specific 1-dimensional text format to represent the 2D visual tablature. You MUST decode them using the following rules:
 
 1. Fingering Notation (String and Fret):
@@ -161,7 +161,7 @@ Read the specific segment or bar mentioned in the question. Compare your visual 
 
 
 JIANPU_PROMPT_TAIL = """
-【CRITICAL REQUIREMENT】
+[CRITICAL REQUIREMENT]
 You are taking a Jianpu (Numbered Musical Notation) exam.
 1. Format each note: [Pitch Modifier][Note Number]([Duration Fraction])
    - Note Number: 1-7 for pitch, 0 for rest.
@@ -216,20 +216,20 @@ def run_task(task, output_excel=None):
     output_excel = output_excel or cfg["output_excel"]
 
     if not os.path.exists(qa_json):
-        print(f"❌ 找不到题库 JSON 文件: {qa_json}")
+        print(f"[Error] Question-bank JSON file not found: {qa_json}")
         return
 
     with open(qa_json, 'r', encoding='utf-8') as f:
         qa_data = json.load(f)
 
-    label = {"notation": "五线谱", "guitar": "吉他谱", "jianpu": "简谱"}[task]
-    print(f"🎵 成功加载 {len(qa_data)} 道{label}选择题，准备开始识谱考试！")
+    label = {"notation": "staff notation", "guitar": "guitar tablature", "jianpu": "Jianpu"}[task]
+    print(f"Loaded {len(qa_data)} {label} multiple-choice questions.")
 
     results = []
     correct_count = 0
     valid_count = 0
 
-    for item in tqdm(qa_data, desc=f"🤖 AI {label}阅卷中"):
+    for item in tqdm(qa_data, desc=f"Evaluating {label} questions"):
         doc_id = item.get("doc_id", "")
         question = item.get("question", "")
         options = item.get("options", [])
@@ -240,7 +240,7 @@ def run_task(task, output_excel=None):
         image_path = img_path_png if os.path.exists(img_path_png) else img_path_jpg
 
         if not os.path.exists(image_path):
-            tqdm.write(f"⚠️ 找不到对应的{label}图片 {doc_id}，已跳过。")
+            tqdm.write(f"[Warning] Image for {label} item {doc_id} not found; skipping.")
             continue
 
         prompt = construct_mcq_prompt(question, options, task)
@@ -251,9 +251,9 @@ def run_task(task, output_excel=None):
             is_correct = (predicted_letter == ground_truth)
             if is_correct:
                 correct_count += 1
-                tqdm.write(f"✅ {doc_id} | AI预测: {predicted_letter} | 正确答案: {ground_truth}")
+                tqdm.write(f"{doc_id} | Prediction: {predicted_letter} | Reference: {ground_truth}")
             else:
-                tqdm.write(f"❌ {doc_id} | AI预测: {predicted_letter} | 正确答案: {ground_truth} (AI原话: {raw_response[:20]})")
+                tqdm.write(f"{doc_id} | Prediction: {predicted_letter} | Reference: {ground_truth} (Raw: {raw_response[:20]})")
             valid_count += 1
             results.append({
                 "Doc ID": doc_id, "Question": question, "Ground Truth": ground_truth,
@@ -261,7 +261,7 @@ def run_task(task, output_excel=None):
                 "AI Raw Output": raw_response,
             })
         else:
-            tqdm.write(f"⚠️ {doc_id} 接口调用失败: {raw_response}")
+            tqdm.write(f"[Warning] API call failed for {doc_id}: {raw_response}")
 
         pd.DataFrame(results).to_excel(output_excel, index=False)
         time.sleep(1)
@@ -269,21 +269,21 @@ def run_task(task, output_excel=None):
     if valid_count > 0:
         accuracy = (correct_count / valid_count) * 100
         print("\n" + "=" * 50)
-        print(f"🎓 {label}考试结束！成绩单：")
-        print(f"🎯 有效答题数: {valid_count}")
-        print(f"✅ 答对题数: {correct_count}")
-        print(f"🏆 最终准确率 (Accuracy): {accuracy:.2f}%")
-        print(f"📁 详细结果已保存至: {output_excel}")
+        print(f"{label} evaluation complete.")
+        print(f"Valid responses: {valid_count}")
+        print(f"Correct responses: {correct_count}")
+        print(f"Exact accuracy: {accuracy:.2f}%")
+        print(f"Detailed results saved to: {output_excel}")
         print("=" * 50)
 
 
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description="VSU 乐谱视觉问答评测（OpenAI 接口）")
+    parser = argparse.ArgumentParser(description="Visual score understanding evaluation")
     parser.add_argument("--task", choices=list(TASK_CONFIG), default="notation",
-                        help="子任务：notation / guitar / jianpu")
-    parser.add_argument("--output", default=None, help="覆盖输出 Excel 路径")
+                        help="Task: notation / guitar / jianpu")
+    parser.add_argument("--output", default=None, help="Override the output Excel path")
     args = parser.parse_args()
     run_task(args.task, output_excel=args.output)
 

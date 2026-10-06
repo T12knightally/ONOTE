@@ -3,7 +3,6 @@ import sys
 import json
 import time
 import tempfile
-import difflib
 import re
 import base64
 import pandas as pd
@@ -11,6 +10,7 @@ from tqdm import tqdm
 from pydub import AudioSegment
 from pathlib import Path
 from openai import OpenAI
+from sequence_metrics import matching_block_count, matching_precision
 
 _KC_ROOT_ENV = os.environ.get("KNOWLEDGECLAW_ROOT")
 KNOWLEDGECLAW_ROOT = Path(_KC_ROOT_ENV) if _KC_ROOT_ENV else Path(__file__).resolve().parents[2]
@@ -31,13 +31,13 @@ BASE_URL = os.environ.get("APIYI_BASE_URL", "https://api.apiyi.com/v1")
 client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
 
 AUDIO_MODEL = "gemini-3.1-flash-lite-preview"
-CHUNK_LENGTH_MS = 10000  # 切片时长（毫秒）
+CHUNK_LENGTH_MS = 10000  # Audio segment length in milliseconds.
 
 _RAG_CACHE = {}
 
 
 def get_rag_context(domain: str, task: str):
-    """拉取并缓存指定子任务的 RAG 上下文。"""
+    """Retrieve and cache RAG context for the specified task."""
     key = (domain, task)
     if key not in _RAG_CACHE:
         _RAG_CACHE[key], _ = retrieve_task_context(domain, task)
@@ -56,17 +56,13 @@ def normalize_enharmonic(text):
 
 
 def calculate_metric(gt_list, trans_list):
-    """基于 difflib.SequenceMatcher（Ratcliff/Obershelp）的序列比对打分。"""
-    if not trans_list:
-        return 0.0, 0
-    matcher = difflib.SequenceMatcher(None, gt_list, trans_list)
-    matched = sum(triple.size for triple in matcher.get_matching_blocks())
-    return (matched / len(trans_list)) * 100, matched
+    """Return AST matching-block precision (MP) as a percentage and match count."""
+    return matching_precision(gt_list, trans_list) * 100, matching_block_count(gt_list, trans_list)
 
 
 def transcribe_audio(audio_path, prompt, rag_tag, sanitize_fn=None,
                      model=AUDIO_MODEL, max_tokens=None, temperature=0.01, top_p=None):
-    """把前 10 秒音频切片编码后发给模型，返回（清洗后的）文本。失败返回含 [Error] 的字符串。"""
+    """Encode and transcribe the first 10 seconds of audio; failures return an [Error] string."""
     if not os.path.exists(audio_path):
         return "[Error] File not found"
     try:
@@ -113,7 +109,7 @@ def transcribe_audio(audio_path, prompt, rag_tag, sanitize_fn=None,
 ABC_PROMPT = """You are an extremely precise AI music transcription expert.
 Please transcribe the first 10 seconds of this audio into a space-separated sequence of notes.
 
-【Mandatory Requirements】
+[Mandatory Requirements]
 1. Format: <Pitch><Octave>(<Duration>) for example:C4(1/4)
 2. Transcribe the sequence exactly as you hear it.
 3. ANTI-LOOP RULE: Do not repeat the same note indefinitely. If you are unsure, stop transcribing.
@@ -147,11 +143,11 @@ def abc_sanitize(raw_text):
         return ""
     tokens = raw_text.strip().split()
     if len(tokens) > 80:
-        tqdm.write("      [警告] 监测到疑似幻觉/死循环，执行物理截断")
+        tqdm.write("      [Warning] A likely hallucination loop was detected; truncating the output.")
         tokens = tokens[:60]
     for i in range(len(tokens) - 5):
         if len(set(tokens[i:i + 6])) == 1:
-            tqdm.write(f"      [警告] 监测到音符复读，从第 {i} 个音符处切断")
+            tqdm.write(f"      [Warning] Repeated notes detected; truncating at note {i}.")
             tokens = tokens[:i + 1]
             break
     return " ".join(normalize_enharmonic(t) for t in tokens)
@@ -163,7 +159,7 @@ def run_abc(output_excel=None):
     OUTPUT_EXCEL = output_excel or os.path.join(DATA_ROOT, "data", "staff_trans_analyzes.xlsx")
 
     if not os.path.exists(METADATA_PATH):
-        print("❌ 找不到 metadata JSON 文件")
+        print("[Error] Metadata JSON file not found.")
         return
 
     with open(METADATA_PATH, 'r', encoding='utf-8') as f:
@@ -172,7 +168,7 @@ def run_abc(output_excel=None):
     audio_files = [f for f in os.listdir(AUDIO_DIR) if f.lower().endswith(('.mp3', '.wav'))]
     results = []
 
-    for filename in tqdm(audio_files, desc="📊 音高/长度多维评测"):
+    for filename in tqdm(audio_files, desc="Pitch-and-duration evaluation"):
         file_key = os.path.splitext(filename)[0]
         gt_entry = metadata.get(file_key)
         if not gt_entry:
@@ -195,16 +191,16 @@ def run_abc(output_excel=None):
             acc_pitch, _ = calculate_metric(gt_pitches, trans_pitches)
             acc_dur, _ = calculate_metric(gt_durations, trans_durations)
 
-            tqdm.write(f"\n🎵 文件: {filename} | 最终处理音符数: {len(trans_full)}")
-            tqdm.write(f"   🎯 全要素: {acc_full:.1f}% | 🎹 纯音高: {acc_pitch:.1f}% | ⏳ 纯长度: {acc_dur:.1f}%")
+            tqdm.write(f"\nFile: {filename} | Transcribed tokens: {len(trans_full)}")
+            tqdm.write(f"   Full-token MP: {acc_full:.1f}% | Pitch MP: {acc_pitch:.1f}% | Duration MP: {acc_dur:.1f}%")
 
             results.append({
                 "File": filename, "Trans_Count": len(trans_full),
-                "Full_Acc(%)": round(acc_full, 2), "Pitch_Acc(%)": round(acc_pitch, 2),
-                "Duration_Acc(%)": round(acc_dur, 2), "Raw_Output": raw_output
+                "Full_Token_MP(%)": round(acc_full, 2), "Pitch_MP(%)": round(acc_pitch, 2),
+                "Duration_MP(%)": round(acc_dur, 2), "Raw_Output": raw_output
             })
         else:
-            results.append({"File": filename, "Full_Acc(%)": 0, "Raw_Output": "API Error"})
+            results.append({"File": filename, "Full_Token_MP(%)": 0, "Raw_Output": "API Error"})
 
         pd.DataFrame(results).to_excel(OUTPUT_EXCEL, index=False)
         time.sleep(1)
@@ -213,7 +209,7 @@ def run_abc(output_excel=None):
 JIAN_PROMPT = """You are a precise music transcription expert.
 Transcribe the first 10 seconds of this audio into [Structured Jianpu Syntax].
 
-【Mandatory Syntax Rules】
+[Mandatory Syntax Rules]
 1. Format each note: [Pitch Modifier][Note Number]([Duration Fraction])
    - Note Number: 1-7 for pitch, 0 for rest.
    - Pitch Modifier: _ for one octave lower (_5), __ for two octaves lower (__2), ^ for one octave higher (^1). No prefix for middle register.
@@ -259,7 +255,7 @@ def run_jian(output_excel=None):
     OUTPUT_EXCEL = output_excel or os.path.join(DATA_ROOT, "data", "jianpu_trans_analyses.xlsx")
 
     if not os.path.exists(METADATA_PATH):
-        print("❌ 找不到 JSON！")
+        print("[Error] JSON file not found.")
         return
 
     with open(METADATA_PATH, 'r', encoding='utf-8') as f:
@@ -268,7 +264,7 @@ def run_jian(output_excel=None):
     audio_files = [f for f in os.listdir(AUDIO_DIR) if f.lower().endswith(('.mp3', '.wav'))]
     results = []
 
-    for filename in tqdm(audio_files, desc="📊 多维数据评测"):
+    for filename in tqdm(audio_files, desc="Multi-metric evaluation"):
         file_key = os.path.splitext(filename)[0]
         if file_key not in metadata:
             continue
@@ -287,32 +283,32 @@ def run_jian(output_excel=None):
             acc_pitch, _ = calculate_metric(gt_pitch, trans_pitch)
             acc_dur, _ = calculate_metric(gt_dur, trans_dur)
 
-            tqdm.write(f"🎯 成绩 -> 全要素: {acc_full:.1f}% | 🎹 音名: {acc_pitch:.1f}% | ⏳ 时值: {acc_dur:.1f}%")
+            tqdm.write(f"Full-token MP: {acc_full:.1f}% | Pitch MP: {acc_pitch:.1f}% | Duration MP: {acc_dur:.1f}%")
 
             results.append({
                 "File": filename, "Note_Count": len(trans_full),
-                "Full_Accuracy(%)": round(acc_full, 2),
-                "Pitch_Accuracy(%)": round(acc_pitch, 2),
-                "Duration_Accuracy(%)": round(acc_dur, 2),
+                "Full_Token_MP(%)": round(acc_full, 2),
+                "Pitch_MP(%)": round(acc_pitch, 2),
+                "Duration_MP(%)": round(acc_dur, 2),
                 "AI_Raw": raw_output
             })
         else:
-            results.append({"File": filename, "Full_Accuracy(%)": 0, "AI_Raw": raw_output})
+            results.append({"File": filename, "Full_Token_MP(%)": 0, "AI_Raw": raw_output})
 
         pd.DataFrame(results).to_excel(OUTPUT_EXCEL, index=False)
 
-    print(f"\n🎉 评测完成！结果已保存至：{OUTPUT_EXCEL}")
+    print(f"\nEvaluation complete. Results saved to: {OUTPUT_EXCEL}")
 
 
 GUITAR_TRANSCRIBER_PROMPT = """You are an expert AI guitar transcription model. Listen to the first 10 seconds of this guitar audio.
 You must transcribe the notes into a 1-dimensional "Linear Tablature" sequence.
 
-【Linear Tab Format Rules】
+[Linear Tab Format Rules]
 1. Format: S<String>_F<Fret>. Strings: 1 (high e) to 6 (low E). Frets: 0-24. Example: S6_F3
 2. Chords: Join with '+', e.g., S6_F0+S5_F2
 3. Output a space-separated sequence.
 
-【ANTI-HALLUCINATION RULES】
+[ANTI-HALLUCINATION RULES]
 - DO NOT generate sequential mathematical patterns (e.g., S1_F5 S2_F5 S3_F5 S4_F5).
 - DO NOT iterate through frets logically. ONLY transcribe the actual acoustic sounds you hear.
 - Stop immediately when the 10-second audio ends. Maximum 50 notes.
@@ -348,7 +344,7 @@ def guitar_translate_tab_to_pitch(tab_sequence):
 def guitar_sanitize(raw_text):
     tokens = raw_text.strip().split()
     if len(tokens) > 60:
-        tqdm.write("      [系统拦截] 监测到极长幻觉序列，已执行物理切断！")
+        tqdm.write("      [Guard] An excessively long output was detected and truncated.")
         tokens = tokens[:60]
     return " ".join(tokens)
 
@@ -375,13 +371,13 @@ def run_guitar(output_excel=None):
     OUTPUT_EXCEL = output_excel or os.path.join(DATA_ROOT, "data", "guitar_trans_analyzes.xlsx")
 
     if not os.path.exists(AUDIO_DIR) or not os.path.exists(ANNOTATION_DIR):
-        print("❌ 路径错误")
+        print("[Error] Invalid data path.")
         return
 
     audio_files = [f for f in os.listdir(AUDIO_DIR) if f.lower().endswith(('.mp3', '.wav'))]
     results = []
 
-    for audio_filename in tqdm(audio_files, desc="🎸 吉他多维评测进度"):
+    for audio_filename in tqdm(audio_files, desc="Guitar tablature evaluation"):
         base_name = os.path.splitext(audio_filename)[0].replace("_mic", "")
         jams_path = os.path.join(ANNOTATION_DIR, f"{base_name}.jams")
         if not os.path.exists(jams_path):
@@ -390,7 +386,7 @@ def run_guitar(output_excel=None):
         with open(jams_path, 'r', encoding='utf-8') as f:
             jams_data = json.load(f)
 
-        tqdm.write(f"\n🎧 正在处理: {audio_filename}")
+        tqdm.write(f"\nProcessing: {audio_filename}")
         raw_transcription = transcribe_audio(
             os.path.join(AUDIO_DIR, audio_filename), GUITAR_TRANSCRIBER_PROMPT, "guitar",
             sanitize_fn=guitar_sanitize, max_tokens=4096)
@@ -402,13 +398,12 @@ def run_guitar(output_excel=None):
             trans_seq = translated_pitches.split()
             gt_seq = gt_pitches.split()
 
-            tqdm.write(f"      [Step 2 终极比对] 真值: {gt_seq[:8]}...")
-            tqdm.write(f"      [Step 2 终极比对] 听写: {trans_seq[:8]}...")
+            tqdm.write(f"      [Step 2 sequence comparison] Reference: {gt_seq[:8]}...")
+            tqdm.write(f"      [Step 2 sequence comparison] Transcription: {trans_seq[:8]}...")
 
             if trans_seq and gt_seq:
-                matcher = difflib.SequenceMatcher(None, gt_seq, trans_seq)
-                matched = sum(t.size for t in matcher.get_matching_blocks())
-                match_ratio = min((matched / len(trans_seq)) * 100, 100.0)
+                matched = matching_block_count(gt_seq, trans_seq)
+                match_ratio = matching_precision(gt_seq, trans_seq) * 100
             else:
                 match_ratio, matched = 0.0, 0
 
@@ -416,11 +411,11 @@ def run_guitar(output_excel=None):
                 "File": audio_filename,
                 "Linear Tab (Raw)": raw_transcription,
                 "Translated Pitches": translated_pitches,
-                "Accuracy(%)": round(match_ratio, 2),
+                "Matching_Precision(%)": round(match_ratio, 2),
                 "Matched": f"{matched}/{len(trans_seq)}"
             })
         else:
-            results.append({"File": audio_filename, "Accuracy(%)": 0})
+            results.append({"File": audio_filename, "Matching_Precision(%)": 0})
 
         pd.DataFrame(results).to_excel(OUTPUT_EXCEL, index=False)
         time.sleep(1)
@@ -431,10 +426,10 @@ TASKS = {"abc": run_abc, "jian": run_jian, "guitar": run_guitar}
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description="AST 音频转记谱评测")
+    parser = argparse.ArgumentParser(description="Audio-to-symbolic transcription evaluation")
     parser.add_argument("--task", choices=list(TASKS), default="abc",
-                        help="子任务：abc / jian / guitar")
-    parser.add_argument("--output", default=None, help="覆盖输出 Excel 路径")
+                        help="Task: abc / jian / guitar")
+    parser.add_argument("--output", default=None, help="Override the output Excel path")
     args = parser.parse_args()
     TASKS[args.task](output_excel=args.output)
 
