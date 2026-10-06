@@ -125,4 +125,42 @@ Performance of state-of-the-art **Omnimodal LLMs** evaluated on ONOTE. The table
 
 The ONOTE dataset comprises 1,120 high-quality test samples, meticulously cleaned and cross-modally aligned from sources like MusiXQA and GuitarSet.
 
-You can download the dataset via [HuggingFace Datasets](#) 
+You can download the dataset via [HuggingFace Datasets](#)
+
+---
+
+## 🧰 Evaluation Scripts
+
+The runnable task pipelines are kept in `metrics/`:
+
+| Script | Task | Available task names | Result |
+| --- | --- | --- | --- |
+| `metrics/evaluate_ast.py` | Audio-to-Symbolic Transcription | `abc`, `jian`, `guitar` | Excel workbook |
+| `metrics/evaluate_cnc.py` | Cross-Format Notation Conversion | `guitar_to_staff`, `jianpu_to_staff`, `staff_to_jianpu` | Console metrics |
+| `metrics/evaluate_smg.py` | Symbolic Music Generation | `staff`, `guitar`, `jianpu` | CSV file |
+| `metrics/evaluate_vsu.py` | Visual Score Understanding | `notation`, `guitar`, `jianpu` | Excel workbook |
+
+### Setup
+
+Install the Python dependencies from the repository root:
+
+```bash
+pip install -r requirements.txt
+```
+
+The scripts call an OpenAI-compatible API. Set `APIYI_API_KEY` before running them (or place the key in `api_key_apiyi.txt` in the working directory). `APIYI_BASE_URL` can be used to override the default `https://api.apiyi.com/v1` endpoint.
+
+Set `MUSICBENCH_ROOT` to the local MusicBench checkout. The scripts expect the dataset under `<MUSICBENCH_ROOT>/data`; when it is not set, they fall back to `D:\\MusicBench`. Set `KNOWLEDGECLAW_ROOT` to the project that provides the `integration` RAG adapters when it is outside the default project hierarchy.
+
+### Usage
+
+Run a selected subtask from the repository root:
+
+```bash
+python metrics/evaluate_ast.py --task abc --output results/ast.xlsx
+python metrics/evaluate_cnc.py --task staff_to_jianpu
+python metrics/evaluate_smg.py --task staff --output results/smg.csv
+python metrics/evaluate_vsu.py --task notation --output results/vsu.xlsx
+```
+
+Each script also exposes `--help` with the available task names. Output files are written incrementally so an interrupted AST, SMG, or VSU run can be resumed using the same output path.
